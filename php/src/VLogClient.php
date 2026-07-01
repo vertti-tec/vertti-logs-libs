@@ -108,6 +108,7 @@ final class VLogClient
             }
 
             $metadata = $e['metadata'] ?? [];
+
             if ($metadata !== []) {
                 $size = strlen((string) json_encode($metadata));
                 if ($size > self::MAX_METADATA_BYTES) {
@@ -118,21 +119,36 @@ final class VLogClient
                 }
             }
 
-            return [
+            $log = [
                 'timestamp' => $e['timestamp'] ?? gmdate('Y-m-d\TH:i:s.v\Z'),
                 'level' => $e['level'],
                 'message' => $this->sanitize((string) $e['message']),
-                'traceId' => isset($e['traceId']) ? $this->sanitize((string) $e['traceId']) : null,
-                'spanId' => isset($e['spanId']) ? $this->sanitize((string) $e['spanId']) : null,
                 'metadata' => array_merge($metadata, [
-                    '_sdk' => ['name' => self::SDK_NAME, 'version' => self::getSdkVersion()],
+                    '_sdk' => [
+                        'name' => self::SDK_NAME,
+                        'version' => self::getSdkVersion(),
+                    ],
                 ]),
             ];
+
+            if (isset($e['traceId'])) {
+                $log['traceId'] = $this->sanitize((string) $e['traceId']);
+            }
+
+            if (isset($e['spanId'])) {
+                $log['spanId'] = $this->sanitize((string) $e['spanId']);
+            }
+
+            return $log;
         }, $entries);
 
-        $payload = (string) json_encode(['logs' => $mapped], JSON_UNESCAPED_UNICODE);
+        $payload = (string) json_encode(
+            ['logs' => $mapped],
+            JSON_UNESCAPED_UNICODE
+        );
 
         $ch = curl_init($this->url);
+
         curl_setopt_array($ch, [
             CURLOPT_POST => true,
             CURLOPT_POSTFIELDS => $payload,
@@ -145,16 +161,26 @@ final class VLogClient
             CURLOPT_TIMEOUT => 10,
         ]);
 
-        curl_exec($ch);
+        $response = curl_exec($ch);
         $curlError = curl_error($ch);
         $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
 
         if ($curlError !== '') {
-            return ['ok' => false, 'status' => 0];
+            return [
+                'ok' => false,
+                'status' => 0,
+                'body' => null,
+                'error' => $curlError,
+            ];
         }
 
-        return ['ok' => $status >= 200 && $status < 300, 'status' => $status];
+        return [
+            'ok' => $status >= 200 && $status < 300,
+            'status' => $status,
+            'body' => $response ? (string) $response : null,
+            'error' => null,
+        ];
     }
 
     /**
